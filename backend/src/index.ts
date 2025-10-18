@@ -7,7 +7,6 @@ import { config } from "./config/app.config";
 import connectDatabase from "./config/database.config";
 import { errorHandler } from "./middlewares/errorHandler.middleware";
 import { HTTPSTATUS } from "./config/http.config";
-import { asyncHandler } from "./middlewares/asyncHandler.middleware";
 
 import "./config/passport.config";
 import authRoutes from "./routes/auth.route";
@@ -21,58 +20,71 @@ import taskRoutes from "./routes/task.route";
 const app = express();
 const BASE_PATH = config.BASE_PATH;
 
-// ✅ STEP 1: Body parsers first
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ STEP 2: CORS before session (IMPORTANT!)
+// ✅ CORS with production settings
 app.use(
   cors({
-    origin: config.FRONTEND_ORIGIN,
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        config.FRONTEND_ORIGIN
+      ];
+      
+      // Allow requests with no origin (mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        console.log('❌ CORS blocked:', origin);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+    exposedHeaders: ['Set-Cookie']
   })
 );
 
-// ✅ STEP 3: Session configuration
+// ✅ Session with production settings
 app.use(
   session({
     name: "session",
     keys: [config.SESSION_SECRET],
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    secure: false, // FALSE for localhost (no HTTPS)
+    secure: config.NODE_ENV === "production", // HTTPS only in production
     httpOnly: true,
-    sameSite: 'lax'
+    sameSite: config.NODE_ENV === "production" ? "none" : "lax" // 'none' for cross-domain
   })
 );
 
-// ✅ STEP 4: Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ✅ STEP 5: Debug middleware
+// Debug middleware (remove in production if needed)
 app.use((req, res, next) => {
-  console.log('📍 Request:', req.method, req.path);
-  console.log('🔐 Session:', req.session);
-  console.log('👤 User:', req.user);
+  if (config.NODE_ENV === "development") {
+    console.log('📍', req.method, req.path);
+    console.log('🍪 Session:', req.session);
+    console.log('👤 User:', req.user);
+  }
   next();
 });
 
-// ✅ Root route (for health check)
+// Root route
 app.get('/', (req: Request, res: Response) => {
   res.status(HTTPSTATUS.OK).json({
-    message: 'Team Management API Running',
+    message: 'Team Management API',
     version: '1.0.0',
-    endpoints: {
-      auth: `${BASE_PATH}/auth`,
-      user: `${BASE_PATH}/user`,
-      workspace: `${BASE_PATH}/workspace`
-    }
+    environment: config.NODE_ENV
   });
 });
 
-// ✅ Routes
+// Routes
 app.use(`${BASE_PATH}/auth`, authRoutes);
 app.use(`${BASE_PATH}/user`, isAuthenticated, userRoutes);
 app.use(`${BASE_PATH}/workspace`, isAuthenticated, workspaceRoutes);
@@ -80,11 +92,10 @@ app.use(`${BASE_PATH}/member`, isAuthenticated, memberRoutes);
 app.use(`${BASE_PATH}/project`, isAuthenticated, projectRoutes);
 app.use(`${BASE_PATH}/task`, isAuthenticated, taskRoutes);
 
-// ✅ Error handler
 app.use(errorHandler);
 
 app.listen(config.PORT, async () => {
-  console.log(`🚀 Server listening on port ${config.PORT} in ${config.NODE_ENV} mode`);
+  console.log(`🚀 Server on port ${config.PORT} in ${config.NODE_ENV} mode`);
   await connectDatabase();
 });
 
